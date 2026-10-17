@@ -1,6 +1,6 @@
 # Post-quantum signatures in GSR Script
 
-This repository verifies SHRINCS, a post-quantum signature scheme built only from hashes, inside Bitcoin Script. No new signature opcode is needed. The verifier is an ordinary tapleaf script using what GSR restores: hashing and byte operations, arithmetic on large numbers, static macros and `OP_TX`.
+This project implements SHRINCS signature verification in Bitcoin Script. SHRINCS is a post-quantum signature scheme built only from hashes. Its verifier is an ordinary tapleaf script using what GSR restores: hashing and byte operations, arithmetic on large numbers, static macros and `OP_TX`. No new signature opcode is needed.
 
 The verifier is built in five stages, from a one-time signature up to the full scheme, and each stage is measured on the GSR node.
 

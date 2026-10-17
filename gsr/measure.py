@@ -73,22 +73,22 @@ def build_variants(quick: bool) -> list[Variant]:
     out = []
     w = fx.wots_c_fixture()
     p1 = v.stage1(w["key"], w["address"], w["wots_pk"])
-    out.append(Variant("1a", "1", "WOTS+C, inline", [(p1, True)], 0, w["stack"]))
-    out.append(Variant("1b", "1", "WOTS+C, macros", [(p1, False)], 0, w["stack"]))
+    out.append(Variant("1a", "1", "WOTS+C one-time signature, inline", [(p1, True)], 0, w["stack"]))
+    out.append(Variant("1b", "1", "WOTS+C one-time signature, macros", [(p1, False)], 0, w["stack"]))
 
     f = fx.fxmss_fixture()
     p2 = v.stage2(f["key"], f["depth"])
-    out.append(Variant("2a", "2", "FXMSS depth 8, inline", [(p2, True)], 0, f["stack"]))
-    out.append(Variant("2b", "2", "FXMSS depth 8, macros", [(p2, False)], 0, f["stack"]))
+    out.append(Variant("2a", "2", "FXMSS tree, fixed depth 8, inline", [(p2, True)], 0, f["stack"]))
+    out.append(Variant("2b", "2", "FXMSS tree, fixed depth 8, macros", [(p2, False)], 0, f["stack"]))
 
     message = fx.digest("SHRINCS GSR message")
     # (variant, shape, key depth, verifier max depth, signature leaf depth, label)
     stateful = [
-        ("3a", 0, 255, 255, 1, "UXMSS-255 key, 1st signature (depth 1)"),
-        ("3b", 1, 8, 8, 8, "BXMSS-8 key (256 signatures)"),
-        ("3c", 0, 20, 20, 20, "UXMSS-20 key, depth-20 signature (= any BXMSS-20 signature)"),
-        ("3d", 0, 255, 255, 64, "UXMSS-255 key, depth 64"),
-        ("3e", 0, 255, 255, 255, "UXMSS-255 key, last signature (depth 255)"),
+        ("3a", 0, 255, 255, 1, "SHRINCS stateful path: UXMSS-255 key, 1st signature (depth 1)"),
+        ("3b", 1, 8, 8, 8, "SHRINCS stateful path: BXMSS-8 key (256 signatures)"),
+        ("3c", 0, 20, 20, 20, "SHRINCS stateful path: depth-20 signature (UXMSS-20 key; = any BXMSS-20 signature)"),
+        ("3d", 0, 255, 255, 64, "SHRINCS stateful path: UXMSS-255 key, depth 64"),
+        ("3e", 0, 255, 255, 255, "SHRINCS stateful path: UXMSS-255 key, last signature (depth 255)"),
     ]
     if quick:
         stateful = stateful[1:2]
@@ -103,14 +103,14 @@ def build_variants(quick: bool) -> list[Variant]:
     p4 = v.stage4(key)
     for i in range(1 if quick else 3):
         sig = fx.sign(message, 1, 8, None, opt_rand=fx.digest(f"opt_rand {i}")[:16])
-        out.append(Variant(f"4{'abc'[i]}", "4", f"stateless, signature {i + 1}", [(p4, False)], 0, [b"", sig, message],
+        out.append(Variant(f"4{'abc'[i]}", "4", f"SHRINCS stateless path, signature {i + 1}", [(p4, False)], 0, [b"", sig, message],
                            corrupt_at=3000, executed_steps=stateless_steps(sig, message, pk), padded=True))
 
     # Stage 5: one output, two leaves (stateful and stateless), both rebuilding the message with OP_TX.
     leaves = [(v.stage3(key, 8, message="optx"), False), (v.stage4(key, message="optx"), False)]
-    out.append(Variant("5a", "5", "BXMSS-8 leaf, OP_TX message", leaves, 0,
+    out.append(Variant("5a", "5", "SHRINCS, bound by OP_TX: stateful leaf (BXMSS-8 key)", leaves, 0,
                        sign=lambda m: [fx.sign(m, 1, 8, fx.stateful_state(1, 8, 8))], corrupt_at=40))
-    out.append(Variant("5b", "5", "stateless leaf, OP_TX message", leaves, 1,
+    out.append(Variant("5b", "5", "SHRINCS, bound by OP_TX: stateless leaf", leaves, 1,
                        sign=lambda m: [b"", fx.sign(m, 1, 8, None, opt_rand=fx.digest("opt_rand 0")[:16])],
                        corrupt_at=3000, padded=True))
     return out
@@ -237,20 +237,32 @@ def txeval_timed(tx, spent, repeat: int) -> float:
 
 
 def markdown(report: dict) -> str:
-    """The spend table of a results report."""
+    """The spend table of a results report. A macro row and its inline row share one line, with the
+    inline value in brackets where it differs; other rows give the inline script size only."""
+    def fields(r: dict) -> list[str]:
+        return [f"{r['script_bytes']:,}", f"{r['signature_bytes']:,}", f"{r['witness_bytes']:,}",
+                f"{r['tx_weight']:,}", f"{r['tx_vsize']:,}", f"{r['varops'] / 1e6:.2f}M",
+                f"{r['unroll_varops'] / 1e6:.2f}M", f"{r['budget_percent']:.1f}%", f"{r['padding_weight']}",
+                f"{r['verify_us'] or 0:,.0f}"]
+
     lines = [f"Node {report['node']['repo']}@{report['node']['commit'][:10]} ({report['node']['branch']}), "
              f"SHRINCS {report['scheme_commit'][:10]}. Every variant locks into one 43-byte output "
-             f"({OUTPUT_WEIGHT} WU, no varops); the table is the spend.", "",
-             "| id | variant | script B (unrolled) | signature B | witness B | tx WU | vsize vB | varops | "
+             f"({OUTPUT_WEIGHT} WU, no varops); the table is the spend. Brackets: the inline form.", "",
+             "| id | variant | script B (inline) | signature B | witness B | tx WU | vsize vB | varops | "
              "unroll charge | budget used | padding WU | verify µs |",
              "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    inline = {r["stage"]: r for r in report["rows"] if r["inline"]}
     for r in report["rows"]:
-        unrolled = "" if r["inline"] else f" ({r['unrolled_bytes']:,})"
-        lines.append(
-            f"| {r['id']} | {r['label']} | {r['script_bytes']:,}{unrolled} | {r['signature_bytes']:,} | "
-            f"{r['witness_bytes']:,} | {r['tx_weight']:,} | {r['tx_vsize']:,} | {r['varops'] / 1e6:.2f}M | "
-            f"{r['unroll_varops'] / 1e6:.2f}M | {r['budget_percent']:.1f}% | {r['padding_weight']} | "
-            f"{r['verify_us'] or 0:,.0f} |")
+        if r["inline"]:
+            continue
+        cells = fields(r)
+        vid, label = r["id"], r["label"]
+        if r["stage"] in inline:
+            vid, label = r["stage"], label.removesuffix(", macros")
+            cells = [m if m == i else f"{m} ({i})" for m, i in zip(cells, fields(inline[r["stage"]]))]
+        else:
+            cells[0] += f" ({r['unrolled_bytes']:,})"
+        lines.append(f"| {vid} | {label} | " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"
 
 

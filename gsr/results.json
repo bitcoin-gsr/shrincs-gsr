@@ -10,7 +10,7 @@
   {
    "id": "1a",
    "stage": "1",
-   "label": "WOTS+C, inline",
+   "label": "WOTS+C one-time signature, inline",
    "script_bytes": 11234,
    "unrolled_bytes": 11234,
    "inline": true,
@@ -48,7 +48,7 @@
   {
    "id": "1b",
    "stage": "1",
-   "label": "WOTS+C, macros",
+   "label": "WOTS+C one-time signature, macros",
    "script_bytes": 609,
    "unrolled_bytes": 11234,
    "inline": false,
@@ -95,7 +95,7 @@
   {
    "id": "2a",
    "stage": "2",
-   "label": "FXMSS depth 8, inline",
+   "label": "FXMSS tree, fixed depth 8, inline",
    "script_bytes": 12281,
    "unrolled_bytes": 12281,
    "inline": true,
@@ -133,7 +133,7 @@
   {
    "id": "2b",
    "stage": "2",
-   "label": "FXMSS depth 8, macros",
+   "label": "FXMSS tree, fixed depth 8, macros",
    "script_bytes": 773,
    "unrolled_bytes": 12281,
    "inline": false,
@@ -183,7 +183,7 @@
   {
    "id": "3a",
    "stage": "3",
-   "label": "UXMSS-255 key, 1st signature (depth 1)",
+   "label": "SHRINCS stateful path: UXMSS-255 key, 1st signature (depth 1)",
    "script_bytes": 990,
    "unrolled_bytes": 45333,
    "inline": false,
@@ -236,7 +236,7 @@
   {
    "id": "3b",
    "stage": "3",
-   "label": "BXMSS-8 key (256 signatures)",
+   "label": "SHRINCS stateful path: BXMSS-8 key (256 signatures)",
    "script_bytes": 948,
    "unrolled_bytes": 12480,
    "inline": false,
@@ -287,7 +287,7 @@
   {
    "id": "3c",
    "stage": "3",
-   "label": "UXMSS-20 key, depth-20 signature (= any BXMSS-20 signature)",
+   "label": "SHRINCS stateful path: depth-20 signature (UXMSS-20 key; = any BXMSS-20 signature)",
    "script_bytes": 959,
    "unrolled_bytes": 14077,
    "inline": false,
@@ -339,7 +339,7 @@
   {
    "id": "3d",
    "stage": "3",
-   "label": "UXMSS-255 key, depth 64",
+   "label": "SHRINCS stateful path: UXMSS-255 key, depth 64",
    "script_bytes": 990,
    "unrolled_bytes": 45333,
    "inline": false,
@@ -392,7 +392,7 @@
   {
    "id": "3e",
    "stage": "3",
-   "label": "UXMSS-255 key, last signature (depth 255)",
+   "label": "SHRINCS stateful path: UXMSS-255 key, last signature (depth 255)",
    "script_bytes": 990,
    "unrolled_bytes": 45333,
    "inline": false,
@@ -445,7 +445,7 @@
   {
    "id": "4a",
    "stage": "4",
-   "label": "stateless, signature 1",
+   "label": "SHRINCS stateless path, signature 1",
    "script_bytes": 1155,
    "unrolled_bytes": 72647,
    "inline": false,
@@ -500,7 +500,7 @@
   {
    "id": "4b",
    "stage": "4",
-   "label": "stateless, signature 2",
+   "label": "SHRINCS stateless path, signature 2",
    "script_bytes": 1155,
    "unrolled_bytes": 72647,
    "inline": false,
@@ -555,7 +555,7 @@
   {
    "id": "4c",
    "stage": "4",
-   "label": "stateless, signature 3",
+   "label": "SHRINCS stateless path, signature 3",
    "script_bytes": 1155,
    "unrolled_bytes": 72647,
    "inline": false,
@@ -610,7 +610,7 @@
   {
    "id": "5a",
    "stage": "5",
-   "label": "BXMSS-8 leaf, OP_TX message",
+   "label": "SHRINCS, bound by OP_TX: stateful leaf (BXMSS-8 key)",
    "script_bytes": 953,
    "unrolled_bytes": 12485,
    "inline": false,
@@ -663,7 +663,7 @@
   {
    "id": "5b",
    "stage": "5",
-   "label": "stateless leaf, OP_TX message",
+   "label": "SHRINCS, bound by OP_TX: stateless leaf",
    "script_bytes": 1160,
    "unrolled_bytes": 72652,
    "inline": false,

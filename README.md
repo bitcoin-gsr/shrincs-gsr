@@ -274,49 +274,6 @@ So the cost is set by the instruction count, not by hashing. Every instruction p
 **What GSR does not solve:**
 - A quantum-safe output type. That needs P2MR, which is assumed here (see [Security](#security)).
 - Script has no loops. Every possible chain step must exist as code, so skipped steps still pay the unroll charge. A verifier sized for depth 255 pays 6.7M before it runs.
-- Bit-oriented hashes are expensive. A Keccak-f permutation costs as much as about 2,800 SHA-256 calls on 64 bytes.
-
-## Other post-quantum signatures under the same cost model
-
-These are estimates, not verifiers. `gsr/estimates.py` multiplies each scheme's operation counts by unit costs measured on the node, using pieces of the SHRINCS verifiers or small loop bodies written for the scheme (in `gsr/estimates.md`). The only complete new piece is `gsr/keccak.py`: Keccak-f[1600] in Script, checked against a reference and `hashlib.sha3_256`. Spends are priced like stage 5. Script sizes for the estimated schemes are guesses.
-
-| scheme | basis | signatures per key | signature B | varops | spend vB |
-|---|---|---|---:|---:|---:|
-| WOTS+C (stage 1) | measured | 1 | 514 | 10.4M | 394 |
-| SHRINCS stateful, BXMSS-8 (5a) | measured | 256 | 660 | 11.1M | 516 |
-| SHRINCS stateful, depth 20 (3c) | measured | 2²⁰ | 854 | 11.9M | 567 |
-| XMSS-SHA2_10_192 (SP 800-208) | estimate | 1,024 | 1,492 | 33M | 853 (worst 1,193) |
-| XMSS-SHA2_10_256 (RFC 8391) | estimate | 1,024 | 2,500 | 43M | 1,105 (worst 1,562) |
-| Falcon-512, SHA-256 hash-to-point (non-standard) | estimate | unlimited | 1,065 | 56M | 1,418 |
-| SHRINCS stateless (5b) | measured | unlimited | 5,777 | 73.6M | 1,853 |
-| Lamport, 256 bits | estimate | 1 | 8,192 | 8.4M | 2,268 |
-| SLH-DSA-SHA2-128s (FIPS 205) | estimate | unlimited | 7,856 | 101M | 2,535 |
-| Falcon-512 / FN-DSA (SHAKE256) | estimate | unlimited | 1,065 | 186M | 4,656 |
-| SLH-DSA-SHAKE-128s (FIPS 205) | estimate | unlimited | 7,856 | 32.5G | 813,586 (no standard tx) |
-
-**Lamport.** It is the cheapest to verify (8.4M: one hash per bit plus a running hash of the key), but 256 preimages and their complement hashes take 8 KB. WOTS+C is the same idea compressed to 514 B. Larger Winternitz parameters do not pay off without loops: at w = 256, the code for 255 possible steps per chain alone costs over 80M.
-
-**Plain XMSS (RFC 8391).**
-- Why it costs more than SHRINCS stateful:
-  - Each chain step makes three hash calls (a PRF for the key, a PRF for the bitmask, then F), against SHRINCS's one: 40k against 16.4k varops per step.
-  - It has 67 chains of 32-byte values.
-  - It has no WOTS+C counter, so the digit sum, and with it the cost, varies.
-- The result is about 2× SHRINCS stateful. A worst-case signature needs padding.
-
-**SLH-DSA-SHA2-128s.**
-- It uses the same tweakable hash as the SHRINCS stateless path, so its cost is that verifier scaled: 7 layers instead of 5, and 14 FORS trees of height 12 instead of 10 of height 13.
-- Result: 101M varops, which is past the budget its 7.9 KB buys, so it needs about 660 WU of padding. Total 2.5 kvB.
-
-**Keccak and SHAKE.**
-- Keccak-f[1600] measured at **14.4M varops** per permutation. Each round costs 600k: rho/pi 347k, chi 145k, theta 107k.
-- The state is held as five 80-byte rows with every lane doubled, so a lane rotation is a single shift.
-- SHAKE-based hash signatures are therefore out of reach. SLH-DSA-SHAKE-128s needs about 2,250 permutations.
-
-**Falcon-512.**
-- Hash-to-point (SHAKE256, at least 9 permutations, 130M) is 70% of the cost, which confirms the expectation.
-- The NTT is not needed. In Script an NTT is 2,304 butterflies of about 15k each, roughly 35M per transform. GSR's big-number `MUL` instead computes s₂·h as one 2,560 × 2,560-byte multiplication (Kronecker substitution, 6.65M measured), followed by a negacyclic fold.
-- What remains is per-coefficient work: unpack, reduce mod q, centre, square and accumulate the norm, about 33k per coefficient (measured). That totals about 56M.
-- With a SHA-256 hash-to-point, Falcon would be the cheapest unlimited-use option here, at 1.4 kvB. That variant is not FN-DSA and changes its security analysis.
 
 ## Security
 
@@ -349,15 +306,7 @@ python3 gsr/test_verifiers.py
 python3 gsr/feature_shrincs_regtest.py --configfile=../gsr-stark-verifier/build/bitcoin/test/config.ini
 ```
 
-```bash
-python3 gsr/keccak.py
-```
-
-```bash
-python3 gsr/estimates.py
-```
-
-`GSR_ROOT` defaults to `../gsr-stark-verifier`, a checkout of the GSR node built in `build/`. The first `measure.py` run builds `gsr/build/txeval` with `gsr/tools/build_txeval.sh`. Outputs: `gsr/results.json` (with transaction hex and script hashes), `gsr/results.md` and `gsr/estimates.md`.
+`GSR_ROOT` defaults to `../gsr-stark-verifier`, a checkout of the GSR node built in `build/`. The first `measure.py` run builds `gsr/build/txeval` with `gsr/tools/build_txeval.sh`. Outputs: `gsr/results.json` (with transaction hex and script hashes) and `gsr/results.md`.
 
 **Historical material.** `research/`, `tests/` and `artifacts/` belong to the earlier prototype, which used `OP_MULTI` (outside GSR), and to older evaluator versions. Their numbers are not comparable with the tables above.
 

@@ -236,6 +236,29 @@ def txeval_timed(tx, spent, repeat: int) -> float:
     return json.loads(out.stdout)["inputs"][0]["median_us"]
 
 
+def comparison(report: dict) -> str:
+    """Full spend size of the GSR verifiers against a Schnorr key-path spend and against SHRINCS as a
+    native opcode (the upstream draft's 0xC2 CHECKSIG: one leaf `<flag||pk 49 B> OP_CHECKSIG`)."""
+    rows = {r["id"]: r for r in report["rows"]}
+    tap = fx.leaf_tree([b"\x51"])
+    schnorr, _ = fx.spend(tap, "leaf0", [])
+    schnorr.wit.vtxinwit[0].scriptWitness.stack = [bytes(64)]
+    native = fx.leaf_tree([bytes([49]) + bytes(49) + b"\xac"])
+
+    def native_weight(sig_bytes: int) -> int:
+        return fx.spend(native, "leaf0", [bytes(sig_bytes)])[0].get_weight()
+    base = schnorr.get_weight()
+    out = ["| spend | signature B | tx WU | vsize vB | against Schnorr |", "|---|---:|---:|---:|---:|"]
+    for label, sig, weight in (
+            ("Schnorr key path (P2TR, not post-quantum)", 64, base),
+            ("SHRINCS stateful, native opcode", rows["5a"]["signature_bytes"], native_weight(rows["5a"]["signature_bytes"])),
+            ("SHRINCS stateful, GSR Script (5a)", rows["5a"]["signature_bytes"], rows["5a"]["tx_weight"]),
+            ("SHRINCS stateless, native opcode", rows["5b"]["signature_bytes"], native_weight(rows["5b"]["signature_bytes"])),
+            ("SHRINCS stateless, GSR Script (5b)", rows["5b"]["signature_bytes"], rows["5b"]["tx_weight"])):
+        out.append(f"| {label} | {sig:,} | {weight:,} | {-(-weight // 4):,} | {weight / base:.1f}× |")
+    return "\n".join(out) + "\n"
+
+
 def markdown(report: dict) -> str:
     """The spend table of a results report. A macro row and its inline row share one line, with the
     inline value in brackets where it differs; other rows give the inline script size only."""
@@ -263,7 +286,7 @@ def markdown(report: dict) -> str:
         else:
             cells[0] += f" ({r['unrolled_bytes']:,})"
         lines.append(f"| {vid} | {label} | " + " | ".join(cells) + " |")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n\n" + comparison(report)
 
 
 def git_rev(path: Path) -> str:

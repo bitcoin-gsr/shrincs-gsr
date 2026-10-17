@@ -14,3 +14,11 @@ Node jmoik/bitcoin@ad6c16ff02 (gsr), SHRINCS 4cd63a6497. Every variant locks int
 | 4c | SHRINCS stateless path, signature 3 | 1,155 (72,647) | 5,777 | 7,007 | 7,385 | 1,847 | 72.58M | 18.25M | 99.0% | 0 | 1,629 |
 | 5a | SHRINCS, bound by OP_TX: stateful leaf (BXMSS-8 key) | 953 (12,485) | 660 | 1,686 | 2,064 | 516 | 11.12M | 2.93M | 55.2% | 0 | 252 |
 | 5b | SHRINCS, bound by OP_TX: stateless leaf | 1,160 (72,652) | 5,777 | 7,031 | 7,409 | 1,853 | 73.59M | 18.25M | 100.0% | 20 | 1,668 |
+
+| spend | signature B | tx WU | vsize vB | against Schnorr |
+|---|---:|---:|---:|---:|
+| Schnorr key path (P2TR, not post-quantum) | 64 | 444 | 111 | 1.0× |
+| SHRINCS stateful, native opcode | 660 | 1,128 | 282 | 2.5× |
+| SHRINCS stateful, GSR Script (5a) | 660 | 2,064 | 516 | 4.6× |
+| SHRINCS stateless, native opcode | 5,777 | 6,245 | 1,562 | 14.1× |
+| SHRINCS stateless, GSR Script (5b) | 5,777 | 7,409 | 1,853 | 16.7× |

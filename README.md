@@ -35,6 +35,26 @@ Stage 5 is SHRINCS as it would be deployed: one output with both leaves, each si
 - **Timing.** Verification only: the median of 25 runs on an Apple M4 Pro.
 - **Authorization.** Stages 1–4 verify a signature over a 32-byte message from the witness, so they authorize nothing. Stage 5 binds the signature to the spending transaction.
 
+### Full transaction size compared
+
+One input and one output each, spending SHRINCS in GSR Script (stage 5) against two references:
+- a Schnorr key-path spend, which is today's cheapest spend but is not post-quantum;
+- SHRINCS as a native opcode, following the upstream integration draft. That draft redefines `CHECKSIG` in its own leaf version, so the leaf is just `<flag‖public key> OP_CHECKSIG` (51 B).
+
+| spend | signature B | tx WU | vsize vB | against Schnorr |
+|---|---:|---:|---:|---:|
+| Schnorr key path (P2TR, not post-quantum) | 64 | 444 | 111 | 1.0× |
+| SHRINCS stateful, native opcode | 660 | 1,128 | 282 | 2.5× |
+| SHRINCS stateful, GSR Script (5a) | 660 | 2,064 | 516 | 4.6× |
+| SHRINCS stateless, native opcode | 5,777 | 6,245 | 1,562 | 14.1× |
+| SHRINCS stateless, GSR Script (5b) | 5,777 | 7,409 | 1,853 | 16.7× |
+
+The signatures are the same in both SHRINCS forms. What GSR adds is the verifier itself:
+- the leaf script is 953 B (stateful) or 1,160 B (stateless) instead of 51 B;
+- the second leaf adds 32 B to the control block.
+
+That is +936 WU (+234 vB) for a stateful spend, and +1,164 WU (+291 vB) for a stateless one, which includes 20 WU of padding. In exchange, GSR needs no soft fork for the scheme itself. A native opcode would also have its own validation cost, which is not measured here.
+
 Script excerpts below are the assembler source from `gsr/verifiers.py`:
 - opcodes and decimal pushes appear as written;
 - `@NAME` calls a macro, and `NAME_x4` / `NAME_x16` call it 4 and 16 times;

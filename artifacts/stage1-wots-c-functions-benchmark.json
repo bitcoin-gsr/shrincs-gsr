@@ -1,0 +1,36 @@
+{
+  "benchmark": {
+    "epochs_per_run": 15,
+    "evaluator_median_ms": 0.576,
+    "evaluator_run_medians_ms": [
+      0.577,
+      0.576
+    ],
+    "schnorr_80000_run_medians_seconds": [
+      1.214444,
+      1.214539
+    ],
+    "timed_region": "EvalTapscriptV2 plus CheckTapscriptV2ScriptResult"
+  },
+  "build": {
+    "architecture": "arm64",
+    "build_type": "RelWithDebInfo",
+    "compiler": "AppleClang 17",
+    "core_revision": "d2799052604eb138c5a79acf88514a0c8b07f4ef",
+    "core_worktree_clean": true,
+    "optimization": "-O2"
+  },
+  "checksums_sha256": {
+    "benchmark_binary": "33e6219689caf9ff7af8feec13a6388ec6a4584ac58e464b03eb242cc4745404",
+    "benchmark_source": "31c5225d0d478a2cbd885a56943cc21b8b7a9d0f28d455e4a079ce1dd3b75c15",
+    "bitcoin_util": "b04a07011a43df0c2866a1ecfdbb29e79fbcd616c905893a5b45d374e3af5ef0",
+    "eval_fixture": "ad450ddd007423e1ebbe5da8097bd1b8897f6e561292b71aa0ccd2ff63077d13",
+    "result": "022d48d05dd696ee669f651d828cf626d150b017d28ba1e4b3c51f86472a385f"
+  },
+  "hardware": {
+    "chip": "Apple M4 Pro",
+    "memory_gb": 48,
+    "model_identifier": "Mac16,7"
+  },
+  "stage": "WOTS+C verification, reusable functions"
+}

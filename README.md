@@ -1,33 +1,254 @@
-# SHRINCS in GSR Script
+# Post-quantum signatures in GSR Script
 
-Post-quantum signatures checked by ordinary Bitcoin Script on the GSR branch (Tapleaf 0xC2: BIP 440 varops budget, BIP 441 restored opcodes and static macros, `OP_TX`). The scheme is the [upstream SHRINCS draft](https://github.com/SHRINCS/shrincs-bip) at `4cd63a6`. It combines a stateful hash-based signature (WOTS+C one-time keys in an FXMSS tree) with a stateless SPHINCS+-style fallback. Measurements use node `jmoik/bitcoin` branch `gsr` at `ad6c16f`.
+This repository verifies SHRINCS, a post-quantum signature scheme built only from hashes, inside Bitcoin Script. No new signature opcode is needed. The verifier is an ordinary tapleaf script using what GSR restores: hashing and byte operations, arithmetic on large numbers, static macros and `OP_TX`.
 
-## Result
+The verifier is built in five stages, from a one-time signature up to the full scheme, and each stage is measured on the GSR node.
 
-- **Spend cost.** Bound to its transaction, a SHRINCS spend costs **516 vB** with a stateful signature (a key for 256 signatures) and **1,853 vB** with the stateless fallback. A Schnorr key-path spend of the same shape is about 111 vB, so these are 4.6× and 17× larger.
-- **Budget.** Both fit the GSR budget without a new opcode. The stateful spend uses 55% of the varops its own weight buys. The stateless spend uses 97–100%. About 3% of stateless signatures need padding; at the 99th percentile that is 70 WU.
-- **Lock cost.** Locking costs the same for every variant: one 43-byte output (172 WU) and no varops. The leaf script (0.6–1.2 KB) is only revealed at spend, where it is counted.
-- **Correctness.**
-  - All 14 variants were spent on regtest through the mempool and a block.
-  - Differential tests check that each verifier accepts exactly what the Python reference accepts.
-  - A signature bound by `OP_TX` fails in any other transaction.
-- **Other schemes.** Under the same cost model, only SHRINCS stateful stays under 600 vB:
-  - XMSS costs about 2× the stateful spend.
-  - SLH-DSA-SHA2-128s costs 1.4× the stateless SHRINCS spend.
-  - Standard Falcon-512 is dominated by SHAKE256. Keccak-f, measured at 14.4M varops, puts it at about 4.7 kvB.
+- **Assumption.** Coins are held in P2MR outputs (BIP 360). P2MR has no key path, so the leaf script is the only way to spend. The tests use P2TR outputs, which the GSR branch can spend today. The leaf scripts, witnesses and costs are the same.
+- **Versions.** SHRINCS draft [`4cd63a6`](https://github.com/SHRINCS/shrincs-bip); GSR node `jmoik/bitcoin`, branch `gsr`, commit `ad6c16f`.
 
-**Verdict: a strong demo, with one hard limit.**
+## Stages
 
-Why it is strong:
-- It is a complete post-quantum authorization path (verify and bind) built only from generic opcodes.
-- The stateful cost is in the range of an ordinary complex script (about 0.5 kvB).
-- Adopting or replacing a scheme takes a new leaf, not a soft fork.
+| id | variant | script B (unrolled) | signature B | witness B | tx WU | vsize vB | varops | unroll charge | budget used | padding WU | verify µs |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1a | WOTS+C, inline | 11,234 | 514 | 11,822 | 12,200 | 3,050 | 7.60M | 0.00M | 6.2% | 0 | 241 |
+| 1b | WOTS+C, macros | 609 (11,234) | 514 | 1,197 | 1,575 | 394 | 10.40M | 2.80M | 68.2% | 0 | 236 |
+| 2a | FXMSS depth 8, inline | 12,281 | 642 | 12,999 | 13,377 | 3,345 | 8.02M | 0.00M | 6.0% | 0 | 268 |
+| 2b | FXMSS depth 8, macros | 773 (12,281) | 642 | 1,491 | 1,869 | 468 | 10.93M | 2.91M | 60.1% | 0 | 259 |
+| 3a | UXMSS-255 key, 1st signature (depth 1) | 990 (45,333) | 548 | 1,612 | 1,990 | 498 | 15.48M | 6.74M | 79.8% | 0 | 333 |
+| 3b | BXMSS-8 key (256 signatures) | 948 (12,480) | 660 | 1,682 | 2,060 | 515 | 11.10M | 2.93M | 55.2% | 0 | 262 |
+| 3c | UXMSS-20 key, depth-20 signature (= any BXMSS-20 signature) | 959 (14,077) | 854 | 1,887 | 2,265 | 567 | 11.95M | 3.11M | 53.9% | 0 | 280 |
+| 3d | UXMSS-255 key, depth 64 | 990 (45,333) | 1,563 | 2,627 | 3,005 | 752 | 18.94M | 6.74M | 64.1% | 0 | 412 |
+| 3e | UXMSS-255 key, last signature (depth 255) | 990 (45,333) | 4,619 | 5,683 | 6,061 | 1,516 | 33.32M | 6.74M | 55.4% | 0 | 640 |
+| 4a | stateless, signature 1 | 1,155 (72,647) | 5,777 | 7,007 | 7,385 | 1,847 | 72.83M | 18.25M | 99.3% | 0 | 1,625 |
+| 4b | stateless, signature 2 | 1,155 (72,647) | 5,777 | 7,007 | 7,385 | 1,847 | 72.34M | 18.25M | 98.6% | 0 | 1,717 |
+| 4c | stateless, signature 3 | 1,155 (72,647) | 5,777 | 7,007 | 7,385 | 1,847 | 72.58M | 18.25M | 99.0% | 0 | 1,629 |
+| 5a | BXMSS-8 leaf, OP_TX message | 953 (12,485) | 660 | 1,686 | 2,064 | 516 | 11.12M | 2.93M | 55.2% | 0 | 252 |
+| 5b | stateless leaf, OP_TX message | 1,160 (72,652) | 5,777 | 7,031 | 7,409 | 1,853 | 73.59M | 18.25M | 100.0% | 20 | 1,668 |
 
-The limits:
-- **Hard limit:** the protection holds only in script-only outputs (P2MR, BIP 360). In P2TR the key path stays quantum-vulnerable.
-- The stateless path sits at the edge of its budget.
-- Stateful signing needs reliable state.
-- None of the code is audited.
+- **Lock.** Every variant locks coins into one 43-byte output (172 WU) and uses no varops. The output commits to the leaf script, which is revealed only at spend.
+- **Spend.** One input and one output. "Script B" is the committed leaf script; in brackets is its size once the macros are unrolled.
+- **Budget.** A spend may use 10,000 varops per weight unit, minus 500,000. The unroll charge is the part paid up front for expanding the macros. Padding is extra witness bytes that buy budget.
+- **Inline (a) against macros (b).** Both run the same instructions. The inline form commits the whole unrolled script.
+- **Timing.** Verification only: the median of 25 runs on an Apple M4 Pro.
+- **Authorization.** Stages 1–4 verify a signature over a 32-byte message from the witness, so they authorize nothing. Stage 5 binds the signature to the spending transaction.
+
+Script excerpts below are the assembler source from `gsr/verifiers.py`:
+- opcodes and decimal pushes appear as written;
+- `@NAME` calls a macro, and `NAME_x4` / `NAME_x16` call it 4 and 16 times;
+- `<…>` is a pushed constant and `...` marks omitted lines;
+- stack pictures list the bottom item first.
+
+### Stage 1: WOTS+C, a one-time signature
+
+**Idea.** A Winternitz key has 32 hash chains of length 15, and the public key commits to the chain ends.
+- **Signing:** the signer reveals one value from each chain, at the position given by a 4-bit digit of the message hash.
+- **Verifying:** the verifier hashes each value the remaining 15 − digit times and checks the ends.
+
+Plain Winternitz adds checksum chains so that a forger cannot move values forward. WOTS+C drops them: the signer grinds a 2-byte counter until the 32 digits sum to exactly 240. Every verification then runs exactly 240 hashes.
+
+**How it is built.**
+- `NIB` takes two digits from the next byte and adds them to a running sum.
+- `CHAIN` takes the next 16-byte value from the signature, builds its address and runs `WALK`.
+- `WALK` holds the 15 possible steps of one chain. Each step is skipped while the counter is above zero, and hashes once it reaches zero.
+
+A last hash of the 32 chain ends gives the one-time public key, which must equal the key in the script.
+
+```
+# main: [signature message]
+SIZE 32 NUMEQUALVERIFY SWAP SIZE 514 NUMEQUALVERIFY SWAP
+<pk_seed‖0⁴⁸‖ADRS[:9]> TOALTSTACK
+...                                          # g = H_grind(message, counter)
+0 SWAP @NIB_x16 DROP 240 NUMEQUALVERIFY      # the 32 digits of g must sum to 240
+32 ROLL 0 SWAP @CHAIN_x16 @CHAIN_x16 DROP    # walk all 32 chains to their ends
+... SWAP CAT SHA256 16 LEFT                  # one-time public key = T(chain ends)
+NIP <wots_pk> EQUAL
+
+# NIB: [sum D] -> [hi lo sum' D']  two digits from the next byte of D
+DUP 1 LEFT DUP 4 RSHIFT SWAP 15 AND 2DUP ADD 4 ROLL ADD 3 ROLL 1 64 SUBSTR
+
+# WALK, step j of 15: [P82 node c] -> skip while c > 0, otherwise hash
+DUP 0NOTEQUAL IF 1SUB ELSE 2 PICK <BE4(j)> CAT ROT CAT SHA256 16 LEFT SWAP ENDIF
+```
+
+**Script size.** 609 B, made up of:
+- the main script: 200 B;
+- `WALK`: 302 B;
+- `CHAIN`: 27 B, `NIB`: 20 B and `BE4`: 10 B;
+- four group macros: 32 B;
+- declaration headers: 18 B.
+
+Unrolled, the script is 11,234 B: `WALK` is written once but runs through 32 `CHAIN` calls.
+
+**Costs.**
+- The signature is 514 B: the counter plus 32 values of 16 B.
+- The spend is 1,575 WU (394 vB) and 10.40M varops, of which 2.80M is the unroll charge. That is 68% of the budget.
+- Inline, the same verifier makes the spend 12,200 WU (3,050 vB).
+- The earlier `OP_MULTI` prototype needed 2,294 WU.
+
+### Stage 2: many signatures from a Merkle tree (FXMSS, depth 8)
+
+**Idea.** 256 one-time keys go under a Merkle tree, and the root becomes the public key. A signature adds its leaf index and the 8 sibling hashes on the path to the root. The signer must remember which leaves it has used: the scheme is stateful.
+
+**How it is built.**
+- Stage 1 recovers the leaf's one-time public key.
+- `FX_LEVEL` hashes one level up. The bit of the index sets the order of the two nodes, and the hash includes the address of the level.
+- Eight calls reach the root, which must equal the root in the script.
+
+```
+# main: [signature message index]
+SIZE 1 NUMEQUALVERIFY ROT SIZE 642 NUMEQUALVERIFY ROT SIZE 32 NUMEQUALVERIFY
+...                                                 # stage 1: the leaf's one-time public key
+@FX_LEVEL_x4 @FX_LEVEL_x4 DROP NIP NIP <sf_root> EQUAL
+
+# FX_LEVEL: [h pos node path] -> [h' pos' node' path']
+DUP 16 LEFT SWAP 16 6000 SUBSTR TOALTSTACK          # next sibling; rest of the path aside
+2 PICK 1 AND 0NOTEQUAL IF SWAP ENDIF CAT            # node‖sib, or sib‖node at an odd position
+ROT 1ADD ROT 1 RSHIFT                               # h' = h + 1, pos' = pos >> 1
+2DUP @BE8 CAT <0x12‖0¹²> CAT <pk_seed‖0⁴⁸> SWAP CAT 3 ROLL CAT SHA256 16 LEFT FROMALTSTACK
+```
+
+**Script size.** 773 B, made up of:
+- the main script: 219 B;
+- `WALK`: 302 B and `FX_LEVEL`: 117 B;
+- `CHAIN`: 27 B, `NIB`: 20 B, `BE8`: 14 B and `BE4`: 10 B;
+- group macros: 40 B;
+- declaration headers: 24 B.
+
+Unrolled, the script is 12,281 B.
+
+**Costs.**
+- The signature is 642 B: stage 1's 514 B plus a 128 B path. The leaf index adds 1 B.
+- The spend is 1,869 WU (468 vB) and 10.93M varops, of which 2.91M is the unroll charge. That is 60% of the budget.
+- Inline, the spend is 3,345 vB.
+- The earlier prototype needed 2,907 WU.
+
+### Stage 3: complete stateful SHRINCS
+
+**Idea.** This is the real SHRINCS signature format, which signs a hashed message. A signature carries, in order:
+- a header byte giving its depth d;
+- a 16-byte randomizer R;
+- the leaf index, in ⌈min(d, 64)/8⌉ bytes;
+- the counter;
+- the chains;
+- a path of 16·d bytes.
+
+The message is hashed with R, the public key and the context `bitcoin-tx` (`H_msg_sf`). Two tree shapes are supported:
+- **Balanced (BXMSS-d):** 2^d leaves, all at depth d.
+- **Unbalanced (UXMSS):** signature k sits at depth k, so early signatures are small.
+
+One verifier accepts every depth up to its maximum.
+
+**How it is built.**
+- The header is parsed and checked: the depth range, the total length, and the index range.
+- Two SHA-256 calls compute `H_msg_sf`.
+- WOTS+C runs as in stage 1.
+- `CFX_LEVEL` repeats up to the maximum depth. Each level runs only while path bytes remain.
+
+```
+# main: [signature message]
+SIZE 32 NUMEQUALVERIFY TOALTSTACK                   # message to the altstack
+SIZE SWAP DUP 1 LEFT xff OVER SUB                   # d = 255 - header byte: the depth
+DUP 1 9 WITHIN VERIFY                               # 1 <= d <= 8 for this verifier
+DUP 64 MIN DUP 7 ADD 3 RSHIFT                       # index bytes s = ceil(min(d, 64) / 8)
+ROT 4 LSHIFT OVER ADD 531 ADD 5 ROLL NUMEQUALVERIFY # length = 531 + s + 16 d
+...
+OVER BYTEREV 1 5 ROLL LSHIFT LESSTHAN VERIFY        # leaf index < 2^min(d, 64)
+...                                                 # H_msg_sf, then WOTS+C as in stage 1
+@CFX_LEVEL_x4 @CFX_LEVEL_x4 DROP NIP NIP <sf_root> EQUAL
+
+# CFX_LEVEL: one more level while path bytes remain
+SIZE 0NOTEQUAL IF @FX_LEVEL ENDIF
+```
+
+**Script size.** The depth-8 verifier is 948 B, made up of:
+- the main script: 386 B;
+- `WALK`: 302 B and `FX_LEVEL`: 117 B;
+- `CHAIN`: 27 B, `NIB`: 20 B, `BE8`: 14 B, `BE4`: 10 B and `CFX_LEVEL`: 6 B;
+- group macros: 40 B;
+- declaration headers: 26 B.
+
+Unrolled, it is 12,480 B. The depth-255 verifier is 990 B (45,333 B unrolled), because it needs larger groups (x16, x64).
+
+**Costs.**
+- **BXMSS-8:** 515 vB and 11.10M varops (55% of the budget).
+- **Depth 20:** 567 vB. This is any signature from a 2²⁰-signature balanced key.
+- **UXMSS-255:** 498 vB at depth 1, 752 vB at depth 64, and 1,516 vB at depth 255.
+- Each extra level adds 16 B and about 70k varops. The 16 WU buy 160k of budget, so deeper signatures stay funded.
+- The maximum depth sets the unroll charge: 2.9M at depth 8 and 6.7M at depth 255. A verifier should be sized to its key.
+
+### Stage 4: the stateless fallback
+
+**Idea.** A signer that has lost its state signs statelessly, in the style of SPHINCS+ (SLH-DSA). The structure has two parts:
+- **FORS:** the message digest selects one leaf in each of 10 FORS trees of height 13. The signature reveals those leaves and their paths, and the 10 roots form a FORS public key.
+- **Hypertree:** 5 layers sign the FORS public key. Each layer is a WOTS-TW one-time signature under a 9-level XMSS tree. WOTS-TW has 35 chains: 32 digits plus 3 checksum digits.
+
+The root of the top layer is the stateless public key.
+
+**How it is built.**
+- `FORS_TREE` hashes the revealed leaf and climbs 13 `HT_LEVEL`s.
+- `LAYER` reuses `NIB`, `CHAIN` and `WALK` for WOTS-TW, then climbs 9 `HT_LEVEL`s.
+- The main script computes `H_msg_sl`, runs 10 FORS trees and 5 layers, and compares the root.
+- A padding item at the bottom of the witness can buy extra budget.
+
+```
+# main: [padding signature message]
+SIZE 32 NUMEQUALVERIFY TOALTSTACK                    # message to the altstack
+SIZE 5777 NUMEQUALVERIFY DUP 1 LEFT xff EQUALVERIFY  # a stateless signature starts with 0xff
+...                                                  # H_msg_sl, tree and leaf index
+@FORS_TREE_x4 @FORS_TREE_x4 @FORS_TREE @FORS_TREE    # 10 FORS roots
+2DROP 2DROP CAT SHA256 16 LEFT                       # FORS public key = T(roots)
+@LAYER_x4 @LAYER DROP NIP NIP <sl_root> EQUAL NIP    # 5 layers up to the root
+
+# LAYER: one hypertree layer
+SIZE 704 DIV 5 SWAP SUB 64 LSHIFT 4 PICK ADD @BE9    # layer j = 5 - (signature left) / 704
+...
+0 SWAP @NIB_x16 DROP 480 SWAP SUB DUP 8 RSHIFT OVER 4 RSHIFT 15 AND ROT 15 AND   # 32 + 3 checksum digits
+35 ROLL 0 SWAP @CHAIN_x16 @CHAIN_x16 @CHAIN @CHAIN @CHAIN DROP                  # 35 chains
+...                                                  # one-time public key
+@HT_LEVEL_x4 @HT_LEVEL_x4 @HT_LEVEL                  # 9 XMSS levels
+```
+
+**Script size.** 1,155 B, made up of:
+- the main script: 310 B;
+- `WALK`: 302 B, `LAYER`: 231 B, `FORS_TREE`: 91 B and `HT_LEVEL`: 45 B;
+- `CHAIN`: 27 B, `NIB`: 20 B, `BE9`: 15 B, `BE8`: 14 B and `BE4`: 10 B;
+- group macros: 56 B;
+- declaration headers: 34 B.
+
+Unrolled, it is 72,647 B, and that unrolling costs 18.25M varops.
+
+**Costs.**
+- The signature is 5,777 B. The spend is 7,385 WU (1,847 vB) and 72.3–72.8M varops: 99% of the budget.
+- The cost is linear in the chain steps a signature needs: 49.6M + 16,326 per step.
+- Over 40 real signatures, the steps averaged 1,318 (standard deviation 64). Without padding, a spend is funded up to 1,457 steps.
+- By the analytic model, 3.4% of signatures need padding: 1.9 WU on average, 71 WU at the 99th percentile, and 1,785 WU in the worst case (every digit 0).
+
+### Stage 5: SHRINCS bound to the transaction
+
+**Idea.** One output holds two leaves: the stateful verifier (stage 3, depth 8) and the stateless one (stage 4). A spend reveals only the leaf it uses. Both sign the spending transaction.
+
+**How it is built.** One line changes in each leaf. The message is no longer taken from the witness, and is instead the SHA-256 of what `OP_TX` collates:
+- version and locktime;
+- every input's outpoint, amount, scriptPubKey and sequence;
+- every output;
+- the input index, the annex and the tapleaf hash.
+
+```
+x00570b222f03 TX SHA256 TOALTSTACK    # replaces: SIZE 32 NUMEQUALVERIFY TOALTSTACK
+```
+
+**Script size.** 953 B (stateful) and 1,160 B (stateless): each is 5 B more than in stages 3 and 4.
+
+**Costs.**
+- **Stateful:** 2,064 WU (516 vB), 11.12M varops (55%).
+- **Stateless:** 7,409 WU (1,853 vB), 73.59M varops (100%); this signature needed 20 WU of padding.
+- Binding costs +19.5k varops and takes the 33 B message item out of the witness.
+- The second leaf adds 32 B to the control block.
+- Rejected both in `txeval` and on regtest:
+  - the same witness on another output;
+  - the same witness in a changed transaction;
+  - a signature made for the other leaf.
 
 ## How GSR provides post-quantum signatures
 
@@ -49,71 +270,9 @@ A verifier is ordinary Script, so there is no signature opcode to standardize. A
 So the cost is set by the instruction count, not by hashing. Every instruction pays a base of 300, plus reads and writes: a push costs about 1.2k, an 8-byte XOR about 1.3k, and a 102-byte SHA-256 about 6.5k. For scale, one stateful verification costs as many varops as 22 `CHECKSIG`s and takes 0.25 ms.
 
 **What GSR does not solve:**
-- The Taproot key path (see [Security](#security)).
+- A quantum-safe output type. That needs P2MR, which is assumed here (see [Security](#security)).
 - Script has no loops. Every possible chain step must exist as code, so skipped steps still pay the unroll charge. A verifier sized for depth 255 pays 6.7M before it runs.
 - Bit-oriented hashes are expensive. A Keccak-f permutation costs as much as about 2,800 SHA-256 calls on 64 bytes.
-
-## Cost per stage
-
-**Lock.** Every variant locks into one output: 8-byte amount and a 34-byte witness program (P2TR here; P2MR has the same size). That is 43 B, or 172 WU in the funding transaction, with no varops. The output commits to the leaf script but does not contain it. **Spend.** The table below is one input and one output, paying back to the same script. It is reproduced by `gsr/measure.py`. Timings are the median of 25 runs of `txeval` on an Apple M4 Pro, verification only.
-
-| id | variant | script B (unrolled) | signature B | witness B | tx WU | vsize vB | varops | unroll charge | budget used | padding WU | verify µs |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1a | WOTS+C, inline | 11,234 | 514 | 11,822 | 12,200 | 3,050 | 7.60M | 0.00M | 6.2% | 0 | 241 |
-| 1b | WOTS+C, macros | 609 (11,234) | 514 | 1,197 | 1,575 | 394 | 10.40M | 2.80M | 68.2% | 0 | 236 |
-| 2a | FXMSS depth 8, inline | 12,281 | 642 | 12,999 | 13,377 | 3,345 | 8.02M | 0.00M | 6.0% | 0 | 268 |
-| 2b | FXMSS depth 8, macros | 773 (12,281) | 642 | 1,491 | 1,869 | 468 | 10.93M | 2.91M | 60.1% | 0 | 259 |
-| 3a | UXMSS-255 key, 1st signature (depth 1) | 990 (45,333) | 548 | 1,612 | 1,990 | 498 | 15.48M | 6.74M | 79.8% | 0 | 333 |
-| 3b | BXMSS-8 key (256 signatures) | 948 (12,480) | 660 | 1,682 | 2,060 | 515 | 11.10M | 2.93M | 55.2% | 0 | 262 |
-| 3c | UXMSS-20 key, depth-20 signature (= any BXMSS-20 signature) | 959 (14,077) | 854 | 1,887 | 2,265 | 567 | 11.95M | 3.11M | 53.9% | 0 | 280 |
-| 3d | UXMSS-255 key, depth 64 | 990 (45,333) | 1,563 | 2,627 | 3,005 | 752 | 18.94M | 6.74M | 64.1% | 0 | 412 |
-| 3e | UXMSS-255 key, last signature (depth 255) | 990 (45,333) | 4,619 | 5,683 | 6,061 | 1,516 | 33.32M | 6.74M | 55.4% | 0 | 640 |
-| 4a | stateless, signature 1 | 1,155 (72,647) | 5,777 | 7,007 | 7,385 | 1,847 | 72.83M | 18.25M | 99.3% | 0 | 1,625 |
-| 4b | stateless, signature 2 | 1,155 (72,647) | 5,777 | 7,007 | 7,385 | 1,847 | 72.34M | 18.25M | 98.6% | 0 | 1,717 |
-| 4c | stateless, signature 3 | 1,155 (72,647) | 5,777 | 7,007 | 7,385 | 1,847 | 72.58M | 18.25M | 99.0% | 0 | 1,629 |
-| 5a | BXMSS-8 leaf, OP_TX message | 953 (12,485) | 660 | 1,686 | 2,064 | 516 | 11.12M | 2.93M | 55.2% | 0 | 252 |
-| 5b | stateless leaf, OP_TX message | 1,160 (72,652) | 5,777 | 7,031 | 7,409 | 1,853 | 73.59M | 18.25M | 100.0% | 20 | 1,668 |
-
-Stages 1–4 verify a signature over a 32-byte message taken from the witness, so they authorize nothing. Stage 5 is the authorization.
-
-**Stage 1: WOTS+C one-time signature**
-- What it checks: 32 hash chains. The signer grinds a counter until the 32 digits sum to 240, so verification always runs exactly 240 chain hashes. The script then hashes the recovered tips and compares the result with the key.
-- Spend: 514 B signature, 394 vB, 10.4M varops (68%).
-- Macros versus inline: the macro form is 7.7× smaller than inline (3,050 vB) and costs 2.8M more varops, which is exactly the unroll charge.
-- Against the earlier `OP_MULTI` prototype, the transaction is 31% smaller.
-
-**Stage 2: FXMSS at a fixed depth of 8**
-- Adds a leaf index and 8 Merkle levels (128 B).
-- Spend: 468 vB, 10.9M varops (60%). This is 36% smaller than the earlier prototype.
-
-**Stage 3: complete stateful SHRINCS**
-- What it adds: parsing of the signature header (depth, R, leaf index, counter), the message hash `H_msg_sf`, and any depth up to the verifier's maximum.
-- Balanced key (BXMSS-8): 515 vB, 11.1M varops (55%). A depth-20 signature, as from a 2²⁰-signature balanced key, costs 567 vB.
-- Unbalanced key (UXMSS-255), where signature k sits at depth k: 498 vB at depth 1, 752 vB at depth 64, and 1,516 vB at depth 255.
-- Each extra level adds 16 B and about 70k varops. The 16 WU fund 160k, so deeper signatures stay funded.
-- The verifier's maximum depth fixes its unroll charge: 2.9M at depth 8, 6.7M at depth 255. A verifier should be sized to its key.
-
-**Stage 4: stateless fallback**
-- What it checks: FORS (k = 10 trees of height 13) and a 5-layer hypertree of WOTS-TW and 9-level XMSS.
-- Spend: 5,777 B signature, 1,847 vB, 72.3–72.8M varops (99%).
-- The cost is linear in the WOTS-TW chain steps a signature needs: 49.6M + 16,326 per step.
-- The step count varies by signature: mean 1,318, standard deviation 64, over 40 real signatures. That matches the analytic model (mean 1,336).
-- Without padding, the spend is funded up to 1,457 steps. Under that model, 3.4% of signatures need padding: 1.9 WU on average, 71 WU at the 99th percentile, and 1,785 WU in the worst case (every digit 0).
-- The verifier takes a padding item, which the script ignores and the signed message does not cover.
-
-**Stage 5: bound to the transaction**
-- The message is SHA-256 of what `OP_TX` collates (selector `00570B222F03`):
-  - version and locktime;
-  - every input's outpoint, amount, scriptPubKey and sequence;
-  - every output;
-  - the input index, annex and tapleaf hash.
-- The stateful and stateless leaves sit under one output, so a spend reveals and pays for only its own leaf.
-- Cost of binding: +5 B of script and +19.5k varops; the 33 B message item drops out of the witness. The second leaf adds 32 B to the control block.
-- Results: stateful 516 vB, 11.1M varops (55%); stateless 1,853 vB, 73.6M varops (100%; this signature needed 20 WU of padding).
-- Rejected, both in `txeval` and on regtest:
-  - the same witness on another output;
-  - the same witness in a changed transaction;
-  - a signature made for the other leaf.
 
 ## Other post-quantum signatures under the same cost model
 
@@ -159,9 +318,8 @@ These are estimates, not verifiers. `gsr/estimates.py` multiplies each scheme's 
 
 ## Security
 
-- **The P2TR key path is quantum-vulnerable.** A Taproot output key is a curve point. An attacker who can compute discrete logarithms spends through the key path, whatever the leaves contain. A NUMS internal key does not help, because the attacker solves for the output key directly.
-  - These leaves protect coins only in script-only outputs, such as P2MR (BIP 360), which commits to a script tree without a key and accepts future leaf versions such as 0xC2.
-  - The demo uses P2TR only because that is what the GSR branch can spend today.
+- **Outputs (the assumption).** The coins must be in a script-only output such as P2MR (BIP 360). P2MR commits to a script tree without a key, and accepts future leaf versions such as 0xC2.
+  - In a P2TR output the output key is a curve point. An attacker who can compute discrete logarithms spends through the key path, whatever the leaves contain. A NUMS internal key does not help, because the attacker solves for the output key directly.
   - See [`gsr-projects/README.md`](../../gsr-projects/README.md) item 9, and [`L2_IDEAS.md`](../../gsr-projects/L2_IDEAS.md) items 19 (post-quantum exit paths) and 25 (post-quantum migration).
 - **State.** A stateful key must never sign twice with the same leaf. A signer that is unsure of its state uses the stateless leaf.
 - **Binding.** Only stage 5 authorizes a spend. Stages 1–4 accept any transaction carrying a valid signature over the witness message.

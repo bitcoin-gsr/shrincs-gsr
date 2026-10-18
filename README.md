@@ -55,6 +55,26 @@ The signatures are the same in both SHRINCS forms. What GSR adds is the verifier
 
 That is +936 WU (+234 vB) for a stateful spend, and +1,164 WU (+291 vB) for a stateless one, which includes 20 WU of padding. In exchange, GSR needs no soft fork for the scheme itself. A native opcode would also have its own validation cost, which is not measured here.
 
+### Compared with Simplicity
+
+Blockstream's Simplicity SHRINCS verifier, ported to these BIP-draft parameters, verifies the same signatures. It uses the same keys, context and message, signed by `impl/shrincs.py`. The port and its measurements are in [`simplicity/shrincs-bip`](../../simplicity/shrincs-bip/README.md), a local workbench outside this repository.
+
+The cost model is Elements': an input may cost 1000 mWU per witness byte, plus 50 WU. The transaction is the same 1-in-1-out one.
+
+| spend | GSR Script vsize | Simplicity vsize | Simplicity / GSR |
+|---|---:|---:|---:|
+| stateful, BXMSS-8 key (3b) | 515 vB | 1,469 vB | 2.9× |
+| stateful, bound to the transaction (5a) | 516 vB | 1,477 vB | 2.9× |
+| stateless (4a) | 1,847 vB | 8,191 vB | 4.4× |
+| stateless, bound to the transaction (5b) | 1,853 vB | 7,682 vB | 4.1× |
+
+The gap has three causes:
+- **Static cost bound.** Simplicity charges a program's worst case. GSR charges varops as they execute.
+- **Moving bits costs more than hashing.** Simplicity charges every combinator and every copied bit. The 22-byte ADRS leaves each hash input unaligned, so a Winternitz step costs about 9.5k mWU, while the SHA-256 compression jet costs 771.
+- **Program size.** The pruned stateful program is 4.7 kB, against the 948 B script here.
+
+A Simplicity jet for the BIP's tweakable hash would remove most of the per-step cost.
+
 Script excerpts below are the assembler source from `gsr/verifiers.py`:
 - opcodes and decimal pushes appear as written;
 - `@NAME` calls a macro, and `NAME_x4` / `NAME_x16` call it 4 and 16 times;

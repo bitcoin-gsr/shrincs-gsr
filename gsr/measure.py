@@ -289,8 +289,9 @@ def markdown(report: dict) -> str:
     return "\n".join(lines) + "\n\n" + comparison(report)
 
 
-def git_rev(path: Path) -> str:
-    r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True)
+def git_rev(path: Path, *files: str) -> str:
+    """HEAD of the repository at `path`, or the last commit that changed `files` there."""
+    r = subprocess.run(["git", "log", "-1", "--format=%H", "HEAD", "--", *files], cwd=path, capture_output=True, text=True)
     return r.stdout.strip()
 
 
@@ -316,7 +317,7 @@ def main() -> None:
               f"tx {row['tx_weight']:6} WU  varops {row['varops']:11,}  {row['budget_percent']:6.2f}%  "
               f"pad {row['padding_weight']}  {row['verify_us'] or 0:8.0f} us", flush=True)
     report = {"node": {"repo": "jmoik/bitcoin", "branch": "gsr", "commit": git_rev(GSR_ROOT / "bitcoin")},
-              "scheme_commit": git_rev(HERE.parent), "ctx": v.CTX.decode(), "rows": rows}
+              "scheme_commit": git_rev(HERE.parent, "impl", "SHRINCS.md"), "ctx": v.CTX.decode(), "rows": rows}
     if not args.only and not args.quick:
         (HERE / "results.json").write_text(json.dumps(report, indent=1) + "\n")
         (HERE / "results.md").write_text(markdown(report))

@@ -4,8 +4,8 @@ This project implements SHRINCS signature verification in Bitcoin Script. SHRINC
 
 The verifier is built in five stages, from a one-time signature up to the full scheme, and each stage is measured on the GSR node.
 
-- **Assumption.** Coins are held in P2MR outputs (BIP 360). P2MR has no key path, so the leaf script is the only way to spend. The tests use P2TR outputs, which the GSR branch can spend today. The leaf scripts, witnesses and costs are the same.
-- **Versions.** SHRINCS draft [`4cd63a6`](https://github.com/SHRINCS/shrincs-bip); GSR node `jmoik/bitcoin`, branch `gsr`, commit `ad6c16f`.
+- **Assumption.** Coins are held in P2MR outputs (BIP 360). P2MR has no key path, so the leaf script is the only way to spend. The tests use P2TR outputs, which the GSR branch can spend today. The leaf scripts and signatures are the same. A P2MR control block omits the 32-byte internal key, so each spend would be 32 WU lighter.
+- **Versions.** SHRINCS draft [`4cd63a6`](https://github.com/SHRINCS/shrincs-bip/tree/4cd63a6497a0ba7c5e99699b94d33973546d9e37); GSR node `jmoik/bitcoin`, branch `gsr`, commit [`ad6c16f`](https://github.com/jmoik/bitcoin/commit/ad6c16ff0214014023ff2a81504048a8850a1c1c). The draft has moved on since; every measured signature still verifies under its reference at `2d1679b`.
 
 ## Stages
 
@@ -30,7 +30,7 @@ Stage 5 is SHRINCS as it would be deployed: one output with both leaves, each si
 
 - **Lock.** Every variant locks coins into one 43-byte output (172 WU) and uses no varops. The output commits to the leaf script, which is revealed only at spend.
 - **Spend.** One input and one output. "Script B" is the committed leaf script.
-- **Budget.** A spend may use 10,000 varops per weight unit, minus 500,000. The unroll charge is the part paid up front for expanding the macros. Padding is extra witness bytes that buy budget.
+- **Budget.** A spend may use 10,000 varops per weight unit, minus 500,000 for checking the input's Taproot commitment. The unroll charge is the part paid up front for expanding the macros. Padding is extra witness bytes that buy budget.
 - **Brackets.** A value in brackets is for the inline form, which runs the same instructions but commits the whole unrolled script. Stages 1 and 2 were also measured inline; for later stages the brackets give only the inline script size.
 - **Timing.** Verification only: the median of 25 runs on an Apple M4 Pro.
 - **Authorization.** Stages 1–4 verify a signature over a 32-byte message from the witness, so they authorize nothing. Stage 5 binds the signature to the spending transaction.
@@ -57,9 +57,9 @@ That is +936 WU (+234 vB) for a stateful spend, and +1,164 WU (+291 vB) for a st
 
 ### Compared with Simplicity
 
-Blockstream's Simplicity SHRINCS verifier, ported to these BIP-draft parameters, verifies the same signatures. It uses the same keys, context and message, signed by `impl/shrincs.py`. The port and its measurements are in [`simplicity/shrincs-bip`](../../simplicity/shrincs-bip/README.md), a local workbench outside this repository.
+Blockstream's Simplicity SHRINCS verifier, ported to these BIP-draft parameters, verifies signatures from the same keys and context, signed by `impl/shrincs.py`. Rows 3b and 4a sign the same message. Rows 5a and 5b sign the `sig_all_hash` of SimplicityHL's dummy Elements transaction instead of the OP_TX message. The port and its measurements are in a local workbench that is not published yet.
 
-The cost model is Elements': an input may cost 1000 mWU per witness byte, plus 50 WU. The transaction is the same 1-in-1-out one.
+The cost model is Elements': an input's static cost bound may be at most its witness size plus 50 WU, and a costlier program pads the witness with an annex. The transaction is the same 1-in-1-out one.
 
 | spend | GSR Script vsize | Simplicity vsize | Simplicity / GSR |
 |---|---:|---:|---:|
@@ -91,7 +91,7 @@ Plain Winternitz adds checksum chains so that a forger cannot move values forwar
 
 **How it is built.**
 - `NIB` takes two digits from the next byte and adds them to a running sum.
-- `CHAIN` takes the next 16-byte value from the signature, builds its address and runs `WALK`.
+- `CHAIN` takes the last remaining 16-byte value from the signature, builds its address and runs `WALK`.
 - `WALK` holds the 15 possible steps of one chain. Each step is skipped while the counter is above zero, and hashes once it reaches zero.
 
 A last hash of the 32 chain ends gives the one-time public key, which must equal the key in the script.
@@ -168,7 +168,7 @@ Unrolled, the script is 12,281 B.
 ### Stage 3: complete stateful SHRINCS
 
 **Idea.** This is the real SHRINCS signature format, which signs a hashed message. A signature carries, in order:
-- a header byte giving its depth d;
+- an indicator byte, the leaf height 255 − d, which gives its depth d;
 - a 16-byte randomizer R;
 - the leaf index, in ⌈min(d, 64)/8⌉ bytes;
 - the counter;
@@ -239,7 +239,7 @@ SIZE 32 NUMEQUALVERIFY TOALTSTACK                    # message to the altstack
 SIZE 5777 NUMEQUALVERIFY DUP 1 LEFT xff EQUALVERIFY  # a stateless signature starts with 0xff
 ...                                                  # H_msg_sl, tree and leaf index
 @FORS_TREE_x4 @FORS_TREE_x4 @FORS_TREE @FORS_TREE    # 10 FORS roots
-2DROP 2DROP CAT SHA256 16 LEFT                       # FORS public key = T(roots)
+2DROP 2DROP CAT SHA256 16 LEFT FROMALTSTACK DROP SWAP   # FORS public key = T(roots)
 @LAYER_x4 @LAYER DROP NIP NIP <sl_root> EQUAL NIP    # 5 layers up to the root
 
 # LAYER: one hypertree layer
@@ -263,7 +263,7 @@ Unrolled, it is 72,647 B, and that unrolling costs 18.25M varops.
 **Costs.**
 - The signature is 5,777 B. The spend is 7,385 WU (1,847 vB) and 72.3–72.8M varops: 99% of the budget.
 - The cost is linear in the chain steps a signature needs: 49.6M + 16,326 per step.
-- Over 40 real signatures, the steps averaged 1,318 (standard deviation 64). Without padding, a spend is funded up to 1,457 steps.
+- A signature needs 1,336 steps on average (standard deviation 68); the three measured ones need 1,395 to 1,425. Without padding, a spend is funded up to 1,456 steps.
 - By the analytic model, 3.4% of signatures need padding: 1.9 WU on average, 71 WU at the 99th percentile, and 1,785 WU in the worst case (every digit 0).
 
 ### Stage 5: SHRINCS bound to the transaction
@@ -271,7 +271,7 @@ Unrolled, it is 72,647 B, and that unrolling costs 18.25M varops.
 **Idea.** One output holds two leaves: the stateful verifier (stage 3, depth 8) and the stateless one (stage 4). A spend reveals only the leaf it uses. Both sign the spending transaction.
 
 **How it is built.** One line changes in each leaf. The message is no longer taken from the witness, and is instead the SHA-256 of what `OP_TX` collates:
-- version and locktime;
+- version, locktime, and the input and output counts;
 - every input's outpoint, amount, scriptPubKey and sequence;
 - every output;
 - the input index, the annex and the tapleaf hash.
@@ -319,7 +319,6 @@ So the cost is set by the instruction count, not by hashing. Every instruction p
 
 - **Outputs (the assumption).** The coins must be in a script-only output such as P2MR (BIP 360). P2MR commits to a script tree without a key, and accepts future leaf versions such as 0xC2.
   - In a P2TR output the output key is a curve point. An attacker who can compute discrete logarithms spends through the key path, whatever the leaves contain. A NUMS internal key does not help, because the attacker solves for the output key directly.
-  - See [`gsr-projects/README.md`](../../gsr-projects/README.md) item 9, and [`L2_IDEAS.md`](../../gsr-projects/L2_IDEAS.md) items 19 (post-quantum exit paths) and 25 (post-quantum migration).
 - **State.** A stateful key must never sign twice with the same leaf. A signer that is unsure of its state uses the stateless leaf.
 - **Binding.** Only stage 5 authorizes a spend. Stages 1–4 accept any transaction carrying a valid signature over the witness message.
 - **Padding.** The padding item is outside the signed message. Like any witness data, a relayer can change it, but that only raises the weight (lowering the fee rate) or invalidates the spend.
@@ -346,7 +345,7 @@ python3 gsr/test_verifiers.py
 python3 gsr/feature_shrincs_regtest.py --configfile=../gsr-stark-verifier/build/bitcoin/test/config.ini
 ```
 
-`GSR_ROOT` defaults to `../gsr-stark-verifier`, a checkout of the GSR node built in `build/`. The first `measure.py` run builds `gsr/build/txeval` with `gsr/tools/build_txeval.sh`. Outputs: `gsr/results.json` (with transaction hex and script hashes) and `gsr/results.md`.
+`GSR_ROOT` defaults to `../gsr-stark-verifier`, a checkout of [gsr-stark-verifier](https://github.com/ekrembal/gsr-stark-verifier). Its `bitcoin` submodule is the GSR node at `ad6c16f`, built in `build/bitcoin` by `recursive-stwo/tools/build.sh`. The assembler core comes from its `risc0-succinct/tools/gsr.py`. The first `measure.py` run builds `gsr/build/txeval` with `gsr/tools/build_txeval.sh`. Outputs: `gsr/results.json` (with transaction hex and script hashes) and `gsr/results.md`.
 
 **Historical material.** `research/`, `tests/` and `artifacts/` belong to the earlier prototype, which used `OP_MULTI` (outside GSR), and to older evaluator versions. Their numbers are not comparable with the tables above.
 
